@@ -1,0 +1,26 @@
+# Environment variables / secrets
+.env
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Vector database - generated locally
+chroma_db/
+
+# Uploaded / local research documents
+data/*.pdf
+data/*.docx
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/

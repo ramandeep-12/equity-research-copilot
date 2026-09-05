@@ -1,0 +1,17 @@
+# UI
+streamlit==1.63.0
+
+# Environment variables
+python-dotenv==1.2.3
+
+# LangChain
+langchain-core==1.6.1
+langchain-openai==1.6.0
+langchain-chroma==1.1.0
+langchain-text-splitters==1.1.2
+
+# PDF processing
+pymupdf==1.28.2
+
+# Structured LLM output
+pydantic==2.13.5
