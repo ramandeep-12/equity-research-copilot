@@ -25,11 +25,13 @@ embeddings = OpenAIEmbeddings(
 # 3. Connect to existing Chroma database
 # --------------------------------------------------
 
-vector_store = Chroma(
-    collection_name="equity_research",
-    embedding_function=embeddings,
-    persist_directory="./chroma_db"
-)
+def get_vector_store(index_dir):
+
+    return Chroma(
+        collection_name="equity_research",
+        embedding_function=embeddings,
+        persist_directory=index_dir
+    )
 
 
 # --------------------------------------------------
@@ -182,7 +184,10 @@ CANDIDATES:
 # 9. Main equity research function
 # --------------------------------------------------
 
-def ask_equity_question(question):
+def ask_equity_question(question, index_dir):
+    vector_store = get_vector_store(
+        index_dir
+    )
 
     # ----------------------------------------------
     # A. Query expansion
@@ -328,21 +333,20 @@ PAGE: {page}
 def generate_search_queries(question):
 
     query_prompt = f"""
-You are helping retrieve information from a company's annual report.
-
-Create 3 different search queries that would help find
-evidence needed to answer the user's question.
+You are generating search queries for information retrieval
+from a company's annual report.
 
 User question:
 {question}
 
-Rules:
-- Keep each query concise.
-- Use financial-report terminology where useful.
-- Cover different ways the annual report may describe the same concept.
-- Do not answer the question.
-- Return exactly 3 queries.
-- Put each query on a separate line.
+Generate exactly 3 concise search queries that could locate
+the evidence required to answer the question.
+
+Use terminology commonly found in annual reports when useful.
+
+Do not answer the question.
+
+Return one query per line.
 """
 
     response = llm.invoke(query_prompt)

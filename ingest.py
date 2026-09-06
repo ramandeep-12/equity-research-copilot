@@ -1,84 +1,235 @@
+import hashlib
+import json
+import shutil
 from pathlib import Path
-from dotenv import load_dotenv
-import fitz
+import pymupdf
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 
+from report_metadata import extract_report_metadata
 
-load_dotenv()
+
+def ingest_pdf(
+    file_bytes: bytes,
+    filename: str
+):
+
+    # ----------------------------------
+    # 1. Generate unique report ID
+    # ----------------------------------
+
+    report_id = hashlib.sha256(
+        file_bytes
+    ).hexdigest()[:12]
 
 
-# --------------------------------
-# 1. Load PDF
-# --------------------------------
+    index_dir = (
+        Path("chroma_db") / report_id
+    )
 
-pdf_path = Path("data/annual_report.pdf")
 
-pdf = fitz.open(pdf_path)
+    marker_file = (
+        index_dir / ".indexed"
+    )
 
-documents = []
 
-for page_number, page in enumerate(pdf, start=1):
+    metadata_file = (
+        index_dir / "metadata.json"
+    )
 
-    text = page.get_text("text")
 
-    if text.strip():
+    # ----------------------------------
+    # 2. Reuse existing index + metadata
+    # ----------------------------------
 
-        documents.append(
-            Document(
-                page_content=text,
-                metadata={
-                    "source": "annual_report.pdf",
-                    "page": page_number
-                }
-            )
+    if marker_file.exists() and metadata_file.exists():
+
+        with open(
+            metadata_file,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            saved_metadata = json.load(f)
+
+
+        return {
+            "report_id": report_id,
+            "index_dir": str(index_dir),
+
+            "filename": saved_metadata["filename"],
+
+            "company_name": saved_metadata["company_name"],
+            "fiscal_year": saved_metadata["fiscal_year"],
+            "report_type": saved_metadata["report_type"],
+
+            "pages": saved_metadata.get("pages"),
+            "chunks": saved_metadata.get("chunks"),
+
+            "reused": True
+        }
+
+
+    # ----------------------------------
+    # 3. Remove incomplete previous index
+    # ----------------------------------
+
+    if index_dir.exists():
+
+        shutil.rmtree(
+            index_dir
         )
 
-print(f"Pages loaded: {len(pdf)}")
-print(f"Pages containing text: {len(documents)}")
+
+    index_dir.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
 
-# --------------------------------
-# 2. Split PDF into chunks
-# --------------------------------
+    # ----------------------------------
+    # 4. Detect report metadata
+    # ----------------------------------
 
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
-    add_start_index=True
-)
-
-chunks = text_splitter.split_documents(documents)
-
-print(f"Chunks created: {len(chunks)}")
+    metadata = extract_report_metadata(
+        file_bytes
+    )
 
 
-# --------------------------------
-# 3. Create embeddings
-# --------------------------------
+    # ----------------------------------
+    # 5. Extract PDF text
+    # ----------------------------------
 
-embeddings = OpenAIEmbeddings(
-    model="text-embedding-3-small"
-)
-
-
-# --------------------------------
-# 4. Create Chroma vector database
-# --------------------------------
-
-vector_store = Chroma(
-    collection_name="equity_research",
-    embedding_function=embeddings,
-    persist_directory="./chroma_db"
-)
+    pdf = pymupdf.open(
+        stream=file_bytes,
+        filetype="pdf"
+    )
 
 
-# --------------------------------
-# 5. Store chunks
-# --------------------------------
+    total_pages = len(pdf)
 
-vector_store.add_documents(chunks)
+    documents = []
 
-print("Annual report indexed successfully.")
+
+    for page_number, page in enumerate(
+        pdf,
+        start=1
+    ):
+
+        text = page.get_text("text")
+
+        if text.strip():
+
+            documents.append(
+                Document(
+                    page_content=text,
+
+                    metadata={
+                        "source": filename,
+                        "page": page_number
+                    }
+                )
+            )
+
+
+    # ----------------------------------
+    # 6. Split into chunks
+    # ----------------------------------
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        add_start_index=True
+    )
+
+
+    chunks = splitter.split_documents(
+        documents
+    )
+
+
+    # ----------------------------------
+    # 7. Create embeddings
+    # ----------------------------------
+
+    embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small"
+    )
+
+
+    # ----------------------------------
+    # 8. Create Chroma database
+    # ----------------------------------
+
+    vector_store = Chroma(
+        collection_name="equity_research",
+        embedding_function=embeddings,
+        persist_directory=str(index_dir)
+    )
+
+
+    vector_store.add_documents(
+        chunks
+    )
+
+
+    # ----------------------------------
+    # 9. Save report metadata
+    # ----------------------------------
+
+    metadata_to_save = {
+        "filename": filename,
+
+        "company_name": metadata.company_name,
+        "fiscal_year": metadata.fiscal_year,
+        "report_type": metadata.report_type,
+
+        "pages": total_pages,
+        "chunks": len(chunks)
+    }
+
+
+    with open(
+        metadata_file,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            metadata_to_save,
+            f,
+            indent=4
+        )
+
+
+    # ----------------------------------
+    # 10. Mark indexing complete
+    # ----------------------------------
+
+    marker_file.touch()
+
+
+    pdf.close()
+
+
+    # ----------------------------------
+    # 11. Return report information
+    # ----------------------------------
+
+    return {
+        "report_id": report_id,
+        "index_dir": str(index_dir),
+
+        "filename": filename,
+
+        "company_name": metadata.company_name,
+        "fiscal_year": metadata.fiscal_year,
+        "report_type": metadata.report_type,
+
+        "pages": total_pages,
+        "chunks": len(chunks),
+
+        "reused": False
+    }
