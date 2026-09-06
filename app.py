@@ -1,3 +1,5 @@
+import hashlib
+
 import streamlit as st
 
 from ingest import ingest_pdf
@@ -8,264 +10,372 @@ from research import ask_equity_question
 # Page configuration
 # --------------------------------------------------
 
+
 st.set_page_config(
     page_title="Equity Research Copilot",
     page_icon="📊",
     layout="wide"
 )
 
-
 st.title("📊 Equity Research Copilot")
 
 st.caption(
-    "Upload a company annual report and ask grounded research questions."
+    "Upload financial reports for one company and ask grounded research questions."
+)
+
+# --------------------------------------------------
+# Initialize chat history
+# --------------------------------------------------
+
+if "messages" not in st.session_state:
+    st.session_state["messages"] = []
+
+# --------------------------------------------------
+# Upload financial reports
+# --------------------------------------------------
+
+uploaded_files = st.file_uploader(
+    "Upload Financial Reports",
+    type=["pdf"],
+    accept_multiple_files=True
 )
 
 
 # --------------------------------------------------
-# Upload report
+# Detect if uploaded selection has changed
 # --------------------------------------------------
 
-uploaded_file = st.file_uploader(
-    "Upload Annual Report",
-    type=["pdf"]
-)
+if uploaded_files:
 
-
-# --------------------------------------------------
-# Detect when user selects another PDF
-# --------------------------------------------------
-
-if uploaded_file is not None:
-
-    current_file = uploaded_file.name
-
-    previous_file = st.session_state.get(
-        "uploaded_filename"
+    current_signature = tuple(
+        sorted(
+            hashlib.sha256(
+                uploaded_file.getvalue()
+            ).hexdigest()
+            for uploaded_file in uploaded_files
+        )
     )
 
+    previous_signature = st.session_state.get(
+        "upload_signature"
+    )
 
-    # New file selected
-    if previous_file != current_file:
+    if previous_signature != current_signature:
 
-        st.session_state["uploaded_filename"] = current_file
+        st.session_state["upload_signature"] = current_signature
 
-        # Remove previous report state
+        # Clear previous active workspace
         st.session_state.pop("index_dir", None)
-        st.session_state.pop("report_name", None)
         st.session_state.pop("company_name", None)
-        st.session_state.pop("fiscal_year", None)
-        st.session_state.pop("report_type", None)
-        st.session_state.pop("pages", None)
-        st.session_state.pop("chunks", None)
-
-
-    st.write(
-        f"Selected report: **{uploaded_file.name}**"
-    )
+        st.session_state.pop("reports", None)
+        st.session_state["messages"] = []
 
 
     # --------------------------------------------------
-    # Process report
+    # Show selected files
     # --------------------------------------------------
 
-    if st.button("Process Report"):
+    st.write("### Selected Reports")
+
+    for uploaded_file in uploaded_files:
+
+        st.write(
+            f"- {uploaded_file.name}"
+        )
+
+
+    # --------------------------------------------------
+    # Process reports
+    # --------------------------------------------------
+
+    if st.button("Process Reports"):
+
+        processed_reports = []
 
         try:
 
             with st.spinner(
-                "Processing and indexing annual report..."
+                "Processing and indexing financial reports..."
             ):
 
-                report_info = ingest_pdf(
-                    uploaded_file.getvalue(),
-                    uploaded_file.name
+                for uploaded_file in uploaded_files:
+
+                    report_info = ingest_pdf(
+                        uploaded_file.getvalue(),
+                        uploaded_file.name
+                    )
+
+                    processed_reports.append(
+                        report_info
+                    )
+
+
+            # --------------------------------------------------
+            # Remove duplicate reports
+            # --------------------------------------------------
+
+            original_count = len(processed_reports)
+
+            unique_reports = {}
+
+            for report in processed_reports:
+
+                report_id = report["report_id"]
+
+                if report_id not in unique_reports:
+
+                    unique_reports[report_id] = report
+
+
+            processed_reports = list(
+                unique_reports.values()
+            )
+
+
+            duplicate_count = (
+                original_count - len(processed_reports)
+            )
+
+
+            if duplicate_count > 0:
+
+                st.info(
+                    f"{duplicate_count} duplicate report(s) "
+                    f"detected and skipped."
                 )
 
 
-            # Save report information
-            st.session_state["index_dir"] = (
-                report_info["index_dir"]
-            )
+            # --------------------------------------------------
+            # Verify all reports belong to same company
+            # --------------------------------------------------
 
-            st.session_state["report_name"] = (
-                report_info["filename"]
-            )
-
-            st.session_state["company_name"] = (
-                report_info["company_name"]
-            )
-
-            st.session_state["fiscal_year"] = (
-                report_info["fiscal_year"]
-            )
-
-            st.session_state["report_type"] = (
-                report_info["report_type"]
-            )
-
-            st.session_state["pages"] = (
-                report_info.get("pages")
-            )
-
-            st.session_state["chunks"] = (
-                report_info.get("chunks")
-            )
-
-            st.session_state["reused"] = (
-                report_info["reused"]
-            )
+            companies = {
+                report["company_name"]
+                for report in processed_reports
+            }
 
 
-            if report_info["reused"]:
+            if len(companies) > 1:
 
-                st.success(
-                    "Report already indexed. Existing index loaded."
+                st.error(
+                    "The uploaded reports appear to belong to "
+                    "different companies. Please upload reports "
+                    "for one company at a time."
                 )
 
             else:
 
-                st.success(
-                    f"Report processed successfully — "
-                    f"{report_info['pages']} pages, "
-                    f"{report_info['chunks']} chunks."
-                )
+                company_name = processed_reports[0][
+                    "company_name"
+                ]
+
+
+                # --------------------------------------------------
+                # Verify same company index
+                # --------------------------------------------------
+
+                index_dirs = {
+                    report["index_dir"]
+                    for report in processed_reports
+                }
+
+
+                if len(index_dirs) != 1:
+
+                    st.error(
+                        "The reports were not stored in the same "
+                        "company knowledge base."
+                    )
+
+                else:
+
+                    # --------------------------------------------------
+                    # Store active workspace
+                    # --------------------------------------------------
+
+                    st.session_state["company_name"] = (
+                        company_name
+                    )
+
+                    st.session_state["index_dir"] = (
+                        processed_reports[0]["index_dir"]
+                    )
+
+                    st.session_state["reports"] = (
+                        processed_reports
+                    )
+
+
+                    # --------------------------------------------------
+                    # New vs reused reports
+                    # --------------------------------------------------
+
+                    new_reports = [
+                        report
+                        for report in processed_reports
+                        if not report["reused"]
+                    ]
+
+
+                    reused_reports = [
+                        report
+                        for report in processed_reports
+                        if report["reused"]
+                    ]
+
+
+                    st.success(
+                        f"{len(processed_reports)} unique report(s) "
+                        f"ready for {company_name}."
+                    )
+
+
+                    if new_reports:
+
+                        st.info(
+                            f"{len(new_reports)} new report(s) indexed."
+                        )
+
+
+                    if reused_reports:
+
+                        st.info(
+                            f"{len(reused_reports)} report(s) "
+                            f"loaded from the existing index."
+                        )
 
 
         except Exception as e:
 
             st.error(
-                f"Unable to process report: {e}"
+                f"Unable to process reports: {e}"
             )
 
 
 # --------------------------------------------------
-# Display detected report metadata
+# Active research workspace
 # --------------------------------------------------
 
-if "index_dir" in st.session_state:
-
-    st.write("### Detected Report")
-
-    col1, col2, col3 = st.columns(3)
-
-
-    with col1:
-
-        st.metric(
-            "Company",
-            st.session_state["company_name"]
-        )
-
-
-    with col2:
-
-        st.metric(
-            "Fiscal Year",
-            st.session_state["fiscal_year"]
-        )
-
-
-    with col3:
-
-        st.metric(
-            "Report Type",
-            st.session_state["report_type"]
-        )
-
-
-    st.caption(
-        f"File: {st.session_state['report_name']}"
-    )
-
-
-# --------------------------------------------------
-# Research section
-# --------------------------------------------------
-
-if "index_dir" in st.session_state:
+if (
+    "index_dir" in st.session_state
+    and "reports" in st.session_state
+):
 
     st.divider()
 
+
+    # --------------------------------------------------
+    # Company
+    # --------------------------------------------------
 
     st.subheader(
         f"Research: {st.session_state['company_name']}"
     )
 
 
-    st.caption(
-        f"{st.session_state['report_type']} "
-        f"• FY {st.session_state['fiscal_year']} "
-        f"• {st.session_state['report_name']}"
-    )
+    # --------------------------------------------------
+    # Available reports
+    # --------------------------------------------------
+
+    st.write("### Available Reports")
 
 
-    question = st.text_input(
-        "Ask a research question",
-        placeholder="e.g. What drove revenue growth?"
-    )
+    for report in st.session_state["reports"]:
+
+        status = (
+            "Existing"
+            if report["reused"]
+            else "New"
+        )
+
+        st.write(
+            f"**{report['report_type']}** "
+            f"• FY {report['fiscal_year']} "
+            f"• {report['filename']} "
+            f"• {status}"
+        )
 
 
     # --------------------------------------------------
-    # Analyze question
+    # Research question
+    # --------------------------------------------------
+# --------------------------------------------------
+# Chat history
+# --------------------------------------------------
+
+    for message in st.session_state["messages"]:
+
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+            # Show sources for assistant messages
+            if message["role"] == "assistant":
+
+                for source in message.get("sources", []):
+
+                    with st.expander(
+                        f"{source['source']} — Page {source['page']}"
+                    ):
+
+                        st.write(source["content"])
+
+
+    # --------------------------------------------------
+    # Chat input
     # --------------------------------------------------
 
-    if st.button("Analyze"):
+    question = st.chat_input(
+        "Ask a research question..."
+    )
 
-        if not question.strip():
 
-            st.warning(
-                "Please enter a question."
+    if question:
+
+    # Previous conversation only
+        chat_history = st.session_state["messages"][-6:]
+
+
+        # Save user message
+        st.session_state["messages"].append(
+            {
+                "role": "user",
+                "content": question
+            }
+        )
+
+
+        with st.chat_message("user"):
+
+            st.markdown(
+                question
             )
 
-        else:
 
-            try:
+        try:
+
+            with st.chat_message("assistant"):
 
                 with st.spinner(
-                    "Analyzing annual report..."
+                    "Analyzing financial reports..."
                 ):
 
                     result = ask_equity_question(
                         question,
-                        st.session_state["index_dir"]
+                        st.session_state["index_dir"],
+                        chat_history=chat_history
                     )
 
-
-                # --------------------------------------
-                # Answer
-                # --------------------------------------
-
-                st.subheader(
-                    "Research Analysis"
-                )
 
                 st.markdown(
                     result["answer"]
                 )
 
 
-                # --------------------------------------
-                # Sources
-                # --------------------------------------
-
-                st.subheader(
-                    "Sources"
-                )
-
-
-                if not result["sources"]:
-
-                    st.info(
-                        "No supporting source excerpts were returned."
-                    )
-
-
                 for source in result["sources"]:
 
                     with st.expander(
-                        f"{source['source']} — "
-                        f"Page {source['page']}"
+                        f"{source['source']} "
+                        f"— Page {source['page']}"
                     ):
 
                         st.write(
@@ -273,8 +383,17 @@ if "index_dir" in st.session_state:
                         )
 
 
-            except Exception as e:
+            st.session_state["messages"].append(
+                {
+                    "role": "assistant",
+                    "content": result["answer"],
+                    "sources": result["sources"]
+                }
+            )
 
-                st.error(
-                    f"Unable to analyze the report: {e}"
-                )
+
+        except Exception as e:
+
+            st.error(
+                f"Unable to analyze the reports: {e}"
+            )

@@ -43,6 +43,43 @@ llm = ChatOpenAI(
     temperature=0
 )
 
+def rewrite_follow_up_question(
+    question: str,
+    chat_history: list
+) -> str:
+
+    if not chat_history:
+        return question
+
+    history_text = "\n".join(
+        f"{message['role'].upper()}: {message['content']}"
+        for message in chat_history[-6:]
+    )
+
+    prompt = f"""
+You are helping with financial research over company reports.
+
+Convert the user's latest question into a standalone research question
+using the conversation history.
+
+Rules:
+- Resolve references such as "that", "it", "this", "the next quarter",
+  "those results", etc.
+- Preserve the user's actual intent.
+- Do not answer the question.
+- Return ONLY the rewritten standalone question.
+
+Conversation:
+{history_text}
+
+Latest question:
+{question}
+"""
+
+    response = llm.invoke(prompt)
+
+    return response.content.strip()
+
 class ResearchAnswer(BaseModel):
     answer: str = Field(
         description="Final grounded equity research answer"
@@ -184,7 +221,15 @@ CANDIDATES:
 # 9. Main equity research function
 # --------------------------------------------------
 
-def ask_equity_question(question, index_dir):
+def ask_equity_question(question, index_dir, chat_history=None):
+    if chat_history is None:
+        chat_history = []
+
+
+    standalone_question = rewrite_follow_up_question(
+        question,
+        chat_history
+    )
     vector_store = get_vector_store(
         index_dir
     )
@@ -193,7 +238,7 @@ def ask_equity_question(question, index_dir):
     # A. Query expansion
     # ----------------------------------------------
 
-    search_queries = generate_search_queries(question)
+    search_queries = generate_search_queries(standalone_question)
 
     # ----------------------------------------------
     # B. Retrieve candidate documents
@@ -231,7 +276,7 @@ def ask_equity_question(question, index_dir):
     # ----------------------------------------------
 
     documents = rerank_documents(
-        question,
+        standalone_question,
         documents,
         top_k=5
     )
@@ -272,7 +317,7 @@ PAGE: {page}
     response = chain.invoke(
         {
             "context": context,
-            "question": question
+            "question": standalone_question
         }
     )
     answer = response.answer
