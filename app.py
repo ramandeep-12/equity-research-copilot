@@ -70,7 +70,6 @@ if uploaded_files:
         st.session_state.pop("reports", None)
         st.session_state["messages"] = []
 
-
     # --------------------------------------------------
     # Show selected files
     # --------------------------------------------------
@@ -82,7 +81,6 @@ if uploaded_files:
         st.write(
             f"- {uploaded_file.name}"
         )
-
 
     # --------------------------------------------------
     # Process reports
@@ -109,7 +107,6 @@ if uploaded_files:
                         report_info
                     )
 
-
             # --------------------------------------------------
             # Remove duplicate reports
             # --------------------------------------------------
@@ -126,16 +123,13 @@ if uploaded_files:
 
                     unique_reports[report_id] = report
 
-
             processed_reports = list(
                 unique_reports.values()
             )
 
-
             duplicate_count = (
                 original_count - len(processed_reports)
             )
-
 
             if duplicate_count > 0:
 
@@ -143,7 +137,6 @@ if uploaded_files:
                     f"{duplicate_count} duplicate report(s) "
                     f"detected and skipped."
                 )
-
 
             # --------------------------------------------------
             # Verify all reports belong to same company
@@ -153,7 +146,6 @@ if uploaded_files:
                 report["company_name"]
                 for report in processed_reports
             }
-
 
             if len(companies) > 1:
 
@@ -169,7 +161,6 @@ if uploaded_files:
                     "company_name"
                 ]
 
-
                 # --------------------------------------------------
                 # Verify same company index
                 # --------------------------------------------------
@@ -178,7 +169,6 @@ if uploaded_files:
                     report["index_dir"]
                     for report in processed_reports
                 }
-
 
                 if len(index_dirs) != 1:
 
@@ -205,7 +195,6 @@ if uploaded_files:
                         processed_reports
                     )
 
-
                     # --------------------------------------------------
                     # New vs reused reports
                     # --------------------------------------------------
@@ -216,19 +205,16 @@ if uploaded_files:
                         if not report["reused"]
                     ]
 
-
                     reused_reports = [
                         report
                         for report in processed_reports
                         if report["reused"]
                     ]
 
-
                     st.success(
                         f"{len(processed_reports)} unique report(s) "
                         f"ready for {company_name}."
                     )
-
 
                     if new_reports:
 
@@ -236,14 +222,12 @@ if uploaded_files:
                             f"{len(new_reports)} new report(s) indexed."
                         )
 
-
                     if reused_reports:
 
                         st.info(
                             f"{len(reused_reports)} report(s) "
                             f"loaded from the existing index."
                         )
-
 
         except Exception as e:
 
@@ -263,7 +247,6 @@ if (
 
     st.divider()
 
-
     # --------------------------------------------------
     # Company
     # --------------------------------------------------
@@ -272,13 +255,11 @@ if (
         f"Research: {st.session_state['company_name']}"
     )
 
-
     # --------------------------------------------------
     # Available reports
     # --------------------------------------------------
 
     st.write("### Available Reports")
-
 
     for report in st.session_state["reports"]:
 
@@ -295,105 +276,321 @@ if (
             f"• {status}"
         )
 
-
-    # --------------------------------------------------
-    # Research question
-    # --------------------------------------------------
-# --------------------------------------------------
-# Chat history
-# --------------------------------------------------
-
-    for message in st.session_state["messages"]:
-
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-            # Show sources for assistant messages
-            if message["role"] == "assistant":
-
-                for source in message.get("sources", []):
-
-                    with st.expander(
-                        f"{source['source']} — Page {source['page']}"
-                    ):
-
-                        st.write(source["content"])
-
-
-    # --------------------------------------------------
-    # Chat input
+        # --------------------------------------------------
+    # Research mode
     # --------------------------------------------------
 
-    question = st.chat_input(
-        "Ask a research question..."
+    research_mode = st.radio(
+        "Research Mode",
+        [
+            "Ask Question",
+            "Compare Reports"
+        ],
+        horizontal=True
     )
 
+    # ==================================================
+    # ASK QUESTION MODE
+    # ==================================================
 
-    if question:
+    if research_mode == "Ask Question":
 
-    # Previous conversation only
-        chat_history = st.session_state["messages"][-6:]
+        # ----------------------------------------------
+        # Display chat history
+        # ----------------------------------------------
 
+        for message in st.session_state["messages"]:
 
-        # Save user message
-        st.session_state["messages"].append(
-            {
-                "role": "user",
-                "content": question
-            }
-        )
-
-
-        with st.chat_message("user"):
-
-            st.markdown(
-                question
-            )
-
-
-        try:
-
-            with st.chat_message("assistant"):
-
-                with st.spinner(
-                    "Analyzing financial reports..."
-                ):
-
-                    result = ask_equity_question(
-                        question,
-                        st.session_state["index_dir"],
-                        chat_history=chat_history
-                    )
-
+            with st.chat_message(
+                message["role"]
+            ):
 
                 st.markdown(
-                    result["answer"]
+                    message["content"]
                 )
 
+                if message["role"] == "assistant":
 
-                for source in result["sources"]:
-
-                    with st.expander(
-                        f"{source['source']} "
-                        f"— Page {source['page']}"
+                    for source in message.get(
+                        "sources",
+                        []
                     ):
 
-                        st.write(
-                            source["content"]
-                        )
+                        with st.expander(
+                            f"{source['report_type']} "
+                            f"• FY {source['fiscal_year']} "
+                            f"• Page {source['page']}"
+                        ):
 
+                            st.write(
+                                source["content"]
+                            )
 
+        # ----------------------------------------------
+        # Chat input
+        # ----------------------------------------------
+
+        question = st.chat_input(
+            "Ask a research question..."
+        )
+
+        if question:
+
+            # Save previous conversation
+            chat_history = (
+                st.session_state["messages"][-6:]
+            )
+
+            # Save/display user question
             st.session_state["messages"].append(
                 {
-                    "role": "assistant",
-                    "content": result["answer"],
-                    "sources": result["sources"]
+                    "role": "user",
+                    "content": question
                 }
             )
 
+            with st.chat_message("user"):
 
-        except Exception as e:
+                st.markdown(
+                    question
+                )
 
-            st.error(
-                f"Unable to analyze the reports: {e}"
+            try:
+
+                with st.chat_message("assistant"):
+
+                    with st.spinner(
+                        "Analyzing financial reports..."
+                    ):
+
+                        result = ask_equity_question(
+                            question,
+                            st.session_state["index_dir"],
+                            chat_history=chat_history
+                        )
+
+                    st.markdown(
+                        result["answer"]
+                    )
+
+                    # ----------------------------------
+                    # Sources
+                    # ----------------------------------
+
+                    for source in result["sources"]:
+
+                        with st.expander(
+                            f"{source['report_type']} "
+                            f"• FY {source['fiscal_year']} "
+                            f"• Page {source['page']}"
+                        ):
+
+                            st.write(
+                                source["content"]
+                            )
+
+                # Save assistant response
+                st.session_state["messages"].append(
+                    {
+                        "role": "assistant",
+                        "content": result["answer"],
+                        "sources": result["sources"]
+                    }
+                )
+
+            except Exception as e:
+
+                st.error(
+                    f"Unable to analyze reports: {e}"
+                )
+
+    # ==================================================
+    # COMPARE REPORTS MODE
+    # ==================================================
+
+    elif research_mode == "Compare Reports":
+
+        reports = st.session_state["reports"]
+
+        # Need at least 2 reports
+        if len(reports) < 2:
+
+            st.warning(
+                "At least two different reports are "
+                "required for comparison."
             )
+
+        else:
+
+            st.write(
+                "### Compare Financial Reports"
+            )
+
+            # ------------------------------------------
+            # Build report options
+            # ------------------------------------------
+
+            report_options = {}
+
+            for report in reports:
+
+                label = (
+                    f"{report['report_type']} "
+                    f"• FY {report['fiscal_year']} "
+                    f"• {report['filename']}"
+                )
+
+                report_options[label] = report
+
+            labels = list(
+                report_options.keys()
+            )
+
+            # ------------------------------------------
+            # Report selectors
+            # ------------------------------------------
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                report_a_label = st.selectbox(
+                    "Report A",
+                    labels,
+                    index=0
+                )
+
+            with col2:
+
+                report_b_label = st.selectbox(
+                    "Report B",
+                    labels,
+                    index=1
+                )
+
+            report_a = report_options[
+                report_a_label
+            ]
+
+            report_b = report_options[
+                report_b_label
+            ]
+
+            # ------------------------------------------
+            # Comparison topic
+            # ------------------------------------------
+
+            comparison_topic = st.text_input(
+                "What would you like to compare?",
+                placeholder=(
+                    "e.g. Cloud revenue growth, "
+                    "operating income, margins, risks"
+                )
+            )
+
+            # ------------------------------------------
+            # Compare button
+            # ------------------------------------------
+
+            if st.button(
+                "Compare Reports"
+            ):
+
+                if (
+                    report_a["report_id"]
+                    == report_b["report_id"]
+                ):
+
+                    st.warning(
+                        "Please select two different reports."
+                    )
+
+                elif not comparison_topic.strip():
+
+                    st.warning(
+                        "Please enter a comparison topic."
+                    )
+
+                else:
+
+                    # ------------------------------------------
+                    # Build comparison question
+                    # ------------------------------------------
+
+    comparison_question = f"""
+Compare {comparison_topic} between these two financial reports:
+
+Report A:
+{report_a['report_type']} • FY {report_a['fiscal_year']}
+
+Report B:
+{report_b['report_type']} • FY {report_b['fiscal_year']}
+
+Explain:
+- the value or disclosure in Report A
+- the value or disclosure in Report B
+- what changed between the two reports
+- the direction and size of the change when the evidence supports it
+
+Use only evidence from these two selected reports.
+"""
+
+    try:
+
+        with st.spinner(
+            "Comparing selected financial reports..."
+        ):
+
+            result = ask_equity_question(
+                comparison_question,
+                st.session_state["index_dir"],
+
+                report_ids=[
+                    report_a["report_id"],
+                    report_b["report_id"]
+                ]
+            )
+
+        # --------------------------------------
+        # Comparison result
+        # --------------------------------------
+
+        st.subheader(
+            "Comparison Analysis"
+        )
+
+        st.markdown(
+            result["answer"]
+        )
+
+        # --------------------------------------
+        # Sources
+        # --------------------------------------
+
+        st.subheader(
+            "Sources"
+        )
+
+        if not result["sources"]:
+
+            st.info(
+                "No supporting source excerpts were returned."
+            )
+
+        for source in result["sources"]:
+
+            with st.expander(
+                f"{source['report_type']} "
+                f"• FY {source['fiscal_year']} "
+                f"• Page {source['page']}"
+            ):
+
+                st.write(
+                    source["content"]
+                )
+
+    except Exception as e:
+
+        st.error(
+            f"Unable to compare reports: {e}"
+        )
