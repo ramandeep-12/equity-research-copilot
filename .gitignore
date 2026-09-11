@@ -7,3 +7,6 @@ data/*.pdf
 data/*.docx
 .DS_Store
 .vscode/
+.streamlit/secrets.toml
+.pytest_cache/
+*.log

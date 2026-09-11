@@ -15,3 +15,5 @@ pymupdf==1.28.2
 
 # Structured LLM output
 pydantic==2.13.5
+# Serialize document indexing and manifest updates
+filelock==3.32.4

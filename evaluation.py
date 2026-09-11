@@ -1,36 +1,19 @@
-evaluation_questions = [
-    "What financial risks does Microsoft face?",
-    "How much did Microsoft Cloud revenue grow?",
-    "What legal liabilities does Microsoft report?",
-    "What currencies expose Microsoft to foreign exchange risk?",
-    "What is Microsoft's interest rate risk?",
-    "How much did total revenue increase in fiscal 2024?",
-    "What drove Intelligent Cloud revenue growth?",
-    "How did Office 365 Commercial perform?",
-    "What are Microsoft's reportable segments?",
-    "What does Microsoft say about artificial intelligence?",
-    "How much was Microsoft's operating income?",
-    "What are Microsoft's major sources of revenue?"
-]
-
-
+"""Manual live evaluation. Requires an API key and an indexed company."""
+import argparse
 from research import ask_equity_question
 
-for i, question in enumerate(evaluation_questions, start=1):
+QUESTIONS = ["What are the major financial risks?", "How has revenue growth changed?",
+             "What drove operating income?", "How did operating cash flow change?"]
 
-    print("\n" + "=" * 80)
-    print(f"QUESTION {i}: {question}")
-    print("=" * 80)
 
-    result = ask_equity_question(question)
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("index_dir")
+    args = parser.parse_args()
+    for question in QUESTIONS:
+        result = ask_equity_question(question, args.index_dir)
+        print(f"\n{question}\n{result['answer']}\nSources: {result['used_sources']}")
 
-    print("\nANSWER:")
-    print(result["answer"])
 
-    print("\nSOURCES:")
-
-    for source in result["sources"]:
-        print(
-            f"- Page {source['page']} "
-            f"({source['source']})"
-        )
+if __name__ == "__main__":
+    main()

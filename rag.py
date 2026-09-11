@@ -1,35 +1,26 @@
-from research import ask_equity_question
+"""Command line research using an existing company index."""
+import argparse
+from research import ask_equity_question, citation_label
 
 
-while True:
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("index_dir", help="Company index folder containing metadata.json")
+    args = parser.parse_args()
+    history = []
+    while True:
+        question = input("\nResearch question (exit to quit): ").strip()
+        if question.lower() in {"exit", "quit"}:
+            break
+        if not question:
+            continue
+        result = ask_equity_question(question, args.index_dir, history)
+        print(result["answer"])
+        for source in result["sources"]:
+            print(f"[{source['id']}] {citation_label(source)}")
+        history.extend([{"role": "user", "content": question},
+                        {"role": "assistant", "content": result["answer"]}])
 
-    question = input(
-        "\nAsk a question about the annual report "
-        "(or type 'exit' to quit): "
-    )
 
-    if question.lower().strip() in ["exit", "quit"]:
-        print("Exiting Equity Research Copilot.")
-        break
-
-    result = ask_equity_question(question)
-
-    print("\n" + "=" * 70)
-    print("EQUITY RESEARCH ANSWER")
-    print("=" * 70)
-
-    print(result["answer"])
-
-    print("\n" + "=" * 70)
-    print("SOURCES")
-    print("=" * 70)
-
-    for source in result["sources"]:
-
-        print(f"\nSource: {source['source']}")
-        print(f"Page: {source['page']}")
-
-        print("\nEvidence:")
-        print(source["content"][:500])
-
-        print("-" * 70)
+if __name__ == "__main__":
+    main()
