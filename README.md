@@ -1,6 +1,6 @@
 # Equity Research Copilot
 
-An AI equity-research platform for conversational analysis and comparison of company financial reports. Built with Streamlit, LangChain, OpenAI embeddings and Chroma.
+A simple student project for reading and comparing company financial reports. Upload PDFs, review key numbers, and ask questions with source pages. Built with Streamlit, LangChain, OpenAI embeddings and Chroma.
 
 ## Run locally
 
@@ -17,29 +17,37 @@ streamlit run app.py
 
 Open http://localhost:8501. The interface loads without a key; report processing and research require a configured key with access to the selected model. Requests incur provider charges.
 
-## Analyst workflow
+## Using the app
 
-1. **Report library:** upload searchable PDFs (50 MB / 2,000 pages maximum per file), then select **Detect report details**. Review and correct issuer, fiscal year, report type and fiscal period. Use one consistent company name for all reports from an issuer. Select **Confirm & index reports**. Different issuers are placed in separate knowledge bases.
-2. **Research chat:** choose a company and up to 12 reports. Ask questions about growth, margins, cash flow, strategy or risks. Follow-ups use the last six messages; changing the company or report scope switches to a separate conversation. Export notes as Markdown.
-3. **Compare periods:** choose distinct baseline and comparison reports, enter a topic and select **Analyze changes**. Evidence is retrieved and reranked independently for each report. Responses distinguish periods, numeric differences, disclosed drivers and a takeaway when the evidence permits.
-4. **Financial metrics:** extract consolidated revenue, operating income, net income or operating cash flow for each report's current covered period. Rows retain period, reported scale, currency, accounting basis, source page and quote. Missing or unverifiable figures are explicitly reported. Export CSV for further analysis.
-5. Expand numbered citations to inspect evidence and download the original report. Citations use physical, one-based **PDF pages, including the cover**, which can differ from printed page labels.
+1. **Upload one PDF.** Use the upload control at the top to choose a searchable annual, quarterly, or earnings report (up to 50 MB). The app validates and analyzes it automatically. Failed uploads have a retry button.
+2. **Review the summary.** Expand **Report summary** to read key insights, revenue, net income, diluted EPS, and risks. Financial values appear in full-width rows with explicit units. Unverified figures are labeled as unavailable.
+3. **Check sources.** **Report sources and downloads** contains evidence and downloads. Page references appear beside findings. Open **Sources and evidence** to choose a page, review its figures in a table and read supporting quotes. Enable **Show original extracted text** to inspect the raw excerpt, or download the original PDF.
+4. **Ask a question.** Enter your question in the central conversation box and press **Ask**. Chat uses only the selected PDF and remembers follow-up questions. Comparisons are possible when that PDF contains comparable prior-year figures.
+5. **Switch PDFs.** Uploading another PDF selects it for analysis. The current PDF stays active while you chat; older reports are not mixed into its answers.
+6. **Export notes.** Download the financial table as CSV or the conversation as Markdown.
 
 ## How it works
 
 ```text
-PDF uploads → content fingerprint → duplicate lookup → metadata detection + analyst review
-    → page-preserving text extraction → overlapping chunks → OpenAI embeddings
-    → company-specific Chroma index + atomic report manifest
+One PDF → financial-report validation + issuer/period detection
+    → duplicate lookup → page-preserving chunks
+    → OpenAI embeddings → company-specific Chroma index
+    → structured analysis of the selected PDF → quote and numeric checks
+    → cached research dashboard + comparable financial series
 
 Question + conversation → standalone question → query expansion
-    → retrieval per selected report → reranking per report
-    → structured answer → citation-reference validation → answer + evidence
+    → retrieval and reranking within the selected PDF → grounded answer + checked citations
 ```
 
-Embeddings use `text-embedding-3-small`; the default research and metadata model is `gpt-4.1-mini`. `OPENAI_MODEL` can override the chat model. Model clients initialize only when needed. Existing company indexes from the original project remain readable in persistent mode. Previously indexed PDFs without a saved original remain searchable, but have no PDF download.
+The dashboard extracts core consolidated financial metrics, diluted EPS and disclosed product/cloud figures from current and comparative periods. Metrics preserve their printed sign and scale. Numeric quotes, period headers and unit excerpts must exist on the cited PDF page; the value's fiscal year must appear in its period quote. Narrative findings also need an exact supporting quote. These checks verify excerpts and numeric values, not full semantic entailment of every generated statement.
 
-Duplicate detection hashes normalized extracted text, so renaming a file or changing PDF container metadata does not create another index entry. Image-only changes with identical extracted text are considered duplicates. A filesystem lock serializes ingestion, deterministic chunk IDs support retries, and manifests publish atomically only after indexing completes. Failed attempts remove their report's vectors. No other reports are removed.
+Charts normalize monetary units, keep currencies, accounting bases, entity scopes, fiscal-period types and reporting durations separate, and require at least two comparable points. Repeated comparative figures are deduplicated. Conflicting values are excluded from calculations and flagged rather than silently treated as restatements. Changes are computed in Python from accepted figures; changes in growth rates are expressed in percentage points.
+
+Each report's dashboard analysis is cached under its company index in `research_cache/`, keyed by report metadata, model and analysis version. Adding a report analyzes only the new report. Chat reruns do not regenerate the dashboard. Failed report analyses are reported separately and can be retried without reprocessing successful reports.
+
+Embeddings use `text-embedding-3-small`; the default research model is `gpt-4.1-mini`. `OPENAI_MODEL` overrides the chat model. Existing indexes remain readable in persistent mode. Older indexed reports without a saved original PDF remain searchable but have no PDF download.
+
+Duplicate detection hashes normalized extracted text, so renaming a PDF does not create another report. A filesystem lock serializes ingestion, deterministic chunk IDs support retries, and manifests publish atomically after each report finishes indexing. Previously indexed reports remain available if a new upload fails.
 
 ## Workspace storage
 
@@ -66,7 +74,7 @@ Duplicate detection hashes normalized extracted text, so renaming a file or chan
    EQUITY_WORKSPACE_MODE = "session"
    ```
 
-4. Deploy, upload a report, confirm metadata, and verify an answer against its source page.
+4. Deploy, upload a report, let the dashboard generate, and verify a finding against its source page.
 
 See Streamlit's [deployment guide](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy) and [secrets guide](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management). Do not rely on a hosting container's local filesystem for durable storage across replacement or redeployment. Use a host with a persistent volume when long-term libraries are required. A public deployment using your server API key needs platform access controls or additional authentication/rate limiting to control access and spending.
 
@@ -88,7 +96,7 @@ python -m unittest discover -s tests -v
 python -m pip check
 ```
 
-Tests use real PDFs, a temporary real Chroma database with deterministic test embeddings, and Streamlit's AppTest. AI calls are mocked so tests do not incur charges. Coverage includes duplicates, isolation, invalid PDFs, rollback, report-balanced retrieval, citations, conversational history, extraction quote/value checks, missing-key startup, chat and comparison interactions.
+Tests use real PDFs, a temporary real Chroma database with deterministic test embeddings, and Streamlit's AppTest. AI calls are mocked so tests do not incur charges. Coverage includes automatic and incremental uploads, mixed-company rejection, duplicate handling, company isolation, rollback, citations, conversational history, dashboard caching and partial failures, chart unit conversion, incompatible-period separation, conflicting figures and percentage-point calculations. Model responses are mocked; real-model classification and extraction accuracy require manual validation with representative reports.
 
 For manual live evaluation after indexing reports:
 
@@ -103,19 +111,21 @@ These commands use the provider API. For session-mode indexes, pass the actual c
 ## Boundaries
 
 - Searchable PDFs only. OCR and specialized table-layout reconstruction are not implemented.
-- Metadata is AI-detected and explicitly reviewed before indexing. Company aliases are resolved by using the same reviewed name.
+- Financial-report classification and metadata are AI-detected, with verbatim issuer and financial-results excerpts checked against the document. Classification can still make mistakes. Issuer detection happens automatically; punctuation and common legal suffixes are normalized conservatively. Unrelated names are never fuzzy-merged. Annual/quarterly reports and earnings releases are accepted; unrelated documents are rejected. Legacy duplicate uploads are revalidated. Existing libraries are not automatically deleted or rewritten.
 - Citation validation checks that returned source labels exist in retrieved evidence; it does **not** prove every sentence is entailed. Analysts should inspect the displayed passages.
-- Financial extraction checks that the quote is present and the signed value occurs in it. Period, scale, currency and accounting classification still require analyst review. Extraction is on-demand, not an exhaustive audit of every financial statement.
-- Comparisons and change calculations are generated by the model from retrieved evidence. Missing context, incompatible periods and insufficient disclosure can prevent a complete comparison. Automatic trend charts and an independently reconciled financial model are future work.
+- Financial extraction checks that the quote is present and the signed value occurs in it. Period, scale, currency and accounting classification still require analyst review. Dashboard extraction runs automatically after indexing, but is not an exhaustive audit of every financial statement.
+- Chat comparisons are generated by the model from retrieved evidence. Dashboard trend changes are calculated in Python from validated extracted values. Missing context, incompatible periods and insufficient disclosure can prevent a complete comparison. A fully reconciled financial model remains outside the scope of this app.
 - PDFs and extracted text are stored on the server; relevant text is sent to OpenAI for processing. The app has no portfolio execution or live market-data integration.
 
 ## Project files
 
 - `app.py`: interface and session-scoped workflows
 - `ingest.py`: PDF validation, duplicate handling, company libraries and Chroma writes
-- `report_metadata.py`: structured issuer and period detection
+- `report_metadata.py`: financial-report validation and structured issuer/period detection
+- `upload_queue.py`: upload fingerprints and same-issuer batch validation
 - `research.py`: conversational retrieval, reranking, answer generation and citation checks
-- `metrics.py`: evidence-checked structured financial extraction
+- `dashboard.py`: automatic report briefs, persistent caching, validated metrics and trend calculations
+- `metrics.py`: reusable financial extraction and numeric-quote validation helpers
 - `settings.py`: environment configuration and lazy API clients
 - `tests/`: offline backend and Streamlit interaction checks
 - `.streamlit/config.toml`, `Dockerfile`: theme and deployment configuration

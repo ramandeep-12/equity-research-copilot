@@ -9,6 +9,7 @@ from settings import get_embeddings, get_llm
 class ResearchAnswer(BaseModel):
     answer: str = Field(description="Markdown answer with [S1], [S2] citations on every factual claim")
     source_ids: list[str] = Field(description="Source labels actually cited, e.g. S1")
+    compares_report_periods: bool = Field(default=False, description="True for comparisons between financial reporting periods")
 
 
 def get_vector_store(index_dir):
@@ -118,7 +119,7 @@ def ask_equity_question(question, index_dir, chat_history=None, report_ids=None)
     sources = build_sources(retrieve_evidence(standalone, index_dir, report_ids))
     if not sources:
         return {"answer": "No evidence was found in the selected reports.", "sources": [], "used_sources": []}
-    context = "\n\n".join(f"[{s['id']}] {citation_label(s)}\n{s['content']}" for s in sources)
+    context = "\n\n".join(f"[{s['id']}] REPORT_ID {s['report_id']} · {citation_label(s)}\n{s['content']}" for s in sources)
     response = get_llm().with_structured_output(ResearchAnswer).invoke([
         ("system", "You are an equity research analyst. Use ONLY supplied evidence. "
          "Write in plain, standard English with normal word spacing and short paragraphs. "
@@ -130,7 +131,7 @@ def ask_equity_question(question, index_dir, chat_history=None, report_ids=None)
          "claim with exact [S1] style references; source_ids must exactly match those citations. "
          "Never invent figures, causes, periods, or references. Distinguish the report fiscal year "
          "from the period of a figure within it. Use comparable periods, currencies, units, and "
-         "GAAP/non-GAAP bases. For comparisons organize the answer into each selected report, "
+         "GAAP/non-GAAP bases. Automatically recognize questions about changes across periods and set compares_report_periods accordingly. Cite evidence from each relevant report. Never compare quarterly figures directly with annual totals. For comparisons organize the answer into each relevant period, "
          "Change, and Key takeaway. Compute numeric differences only when comparable; changes "
          "between percentages are percentage points. Show the arithmetic. Explain drivers only "
          "when disclosed; distinguish inference from disclosure. If one period is missing, explicitly "
@@ -139,5 +140,47 @@ def ask_equity_question(question, index_dir, chat_history=None, report_ids=None)
         ("human", f"Question: {standalone}\n\nEvidence:\n{context}"),
     ])
     result = validate_answer(response, sources)
+    if (response.compares_report_periods
+            and len({s['report_id'] for s in sources}) > 1
+            and len({s['report_id'] for s in result['sources']}) < 2):
+        result['answer'] = ("I could not verify a period comparison from both relevant reports. "
+                            "The available excerpts are shown below, but they do not establish a complete "
+                            "cross-report change. Try naming the metric and fiscal periods explicitly.")
     result["standalone_question"] = standalone
+    return result
+
+
+def compare_reports(topic, index_dir, baseline_id, comparison_id):
+    """Validate report identities and require evidence from both selected reports."""
+    import json
+    from report_metadata import company_key
+    manifest = json.loads((Path(index_dir) / "metadata.json").read_text())
+    reports = {r['report_id']: r for r in manifest['reports']}
+    if baseline_id == comparison_id:
+        raise ValueError("Select two distinct reports. Re-uploading the same document is not a comparison.")
+    if baseline_id not in reports or comparison_id not in reports:
+        raise ValueError("Both reports must be indexed in the same company library.")
+    selected = [reports[baseline_id], reports[comparison_id]]
+    expected = company_key(manifest['company_name'])
+    if any(company_key(r.get('company_name', manifest['company_name'])) != expected for r in selected):
+        raise ValueError("These reports belong to different companies and cannot be compared in this workspace.")
+    if not topic.strip():
+        raise ValueError("Enter a comparison topic.")
+    labels = [f"{role}: REPORT_ID {r['report_id']}; {r['filename']}; {r['report_type']}; "
+              f"FY{r['fiscal_year']}; {r.get('fiscal_period', 'Unknown')}"
+              for role, r in zip(['Baseline report', 'Comparison report'], selected)]
+    result = ask_equity_question(
+        f"Compare {topic}.\n" + '\n'.join(labels) +
+        "\nUse each report's own current covered period, not a prior-period column repeated in "
+        "the newer report. Cite evidence from BOTH reports. Explain each value or disclosure, "
+        "change, disclosed drivers and takeaway. If report types or durations differ, explain "
+        "the mismatch and do not calculate a misleading period growth rate. If they cover the "
+        "same period, compare disclosures without claiming a year-over-year change.",
+        index_dir, report_ids=[baseline_id, comparison_id])
+    cited_reports = {s['report_id'] for s in result['sources']}
+    if not {baseline_id, comparison_id}.issubset(cited_reports):
+        result['answer'] = ("A complete comparison could not be verified because the answer did not "
+                            "include supporting evidence from both selected reports. Try a more specific "
+                            "metric or disclosure. The available excerpts are shown below; no period change "
+                            "has been established.")
     return result

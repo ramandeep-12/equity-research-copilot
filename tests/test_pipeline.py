@@ -25,8 +25,13 @@ class PipelineTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        self.detector = patch("ingest.extract_report_metadata")
+        self.detect_mock = self.detector.start()
+        self.addCleanup(self.detector.stop)
         self.metadata = ReportMetadata(company_name="Example Inc", fiscal_year="2024",
                                        report_type="Annual Report", fiscal_period="FY")
+
+        self.detect_mock.return_value = self.metadata
 
     def tearDown(self):
         self.temp.cleanup()
@@ -54,6 +59,7 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(prepared["reused"])
         self.assertEqual(len(list_companies(self.root)[0]["reports"]), 1)
         other = self.metadata.model_copy(update={"company_name": "Other Inc"})
+        self.detect_mock.return_value = other
         second = ingest_pdf(pdf_bytes("Other company revenue 500"), "other.pdf", other, self.root)
         self.assertNotEqual(first["index_dir"], second["index_dir"])
         from langchain_chroma import Chroma
@@ -65,7 +71,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.metadata["page"], 1)
 
     def test_unknown_metadata_rejected(self):
-        with self.assertRaisesRegex(ValueError, "company"):
+        with self.assertRaisesRegex(ValueError, "company") :
             ingest_pdf(pdf_bytes("Text"), "a.pdf", self.metadata.model_copy(update={"company_name": "Unknown"}), self.root)
 
     def test_failed_index_does_not_publish_manifest(self):

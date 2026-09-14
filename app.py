@@ -1,6 +1,5 @@
 """Equity Research Copilot — Streamlit entry point."""
 import csv
-import hashlib
 import io
 import logging
 import os
@@ -9,12 +8,52 @@ from pathlib import Path
 import uuid
 
 import streamlit as st
+from source_preview import render_pdf_page
 from ingest import ingest_pdf, list_companies, prepare_report
 from research import ask_equity_question, citation_label
-from metrics import METRICS, extract_financial_metrics
+from dashboard import (SCALES, automatic_changes, dashboard_signature,
+                       load_dashboard, period_order, series_groups)
 from settings import data_root
+from upload_queue import file_key
 
-st.set_page_config(page_title="Equity Research Copilot", page_icon="◈", layout="wide")
+st.set_page_config(page_title="Equity Research Copilot", page_icon="📊", layout="wide")
+
+st.markdown("""
+<style>
+.block-container {max-width: 900px; padding-top: 6rem; padding-bottom: 2rem;}
+.stApp {background: #fafbff;}
+[data-testid="stHeader"] {display: none;}
+.app-header {position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    min-height: 64px; padding: 18px 24px; box-sizing: border-box;
+    background: #ffffff; border-bottom: 1px solid #e8ecf3;
+    color: #1f2937; font-size: 18px; font-weight: 600;}
+
+h1 {font-size: clamp(1.65rem, 4vw, 2.3rem) !important; font-weight: 650 !important;}
+[data-testid="stFileUploaderDropzone"] {background: transparent; border: none; padding: 0;}
+[data-testid="stFileUploaderDropzoneInstructions"] {display: none;}
+.st-key-chat-composer {border-radius: 28px; background: white; padding: 14px 18px;
+    box-shadow: 0 4px 20px #2437560a; margin-top: 20px;}
+.st-key-chat-composer [data-testid="stForm"] {border: none; padding: 0;}
+.st-key-chat-composer textarea {border-radius: 18px; background: white;}
+.st-key-chat-upload [data-testid="stFileUploaderDropzone"] button:is([data-testid="stBaseButton-secondary"], [aria-label="Add files"]) {
+    border-radius: 50%; width: 44px; min-width: 44px; height: 44px; padding: 0;
+    background: #edf1f8; border: none; font-size: 0;}
+.st-key-chat-upload [data-testid="stFileUploaderDropzone"] button:is([data-testid="stBaseButton-secondary"], [aria-label="Add files"]) * {display: none;}
+.st-key-chat-upload [data-testid="stFileUploaderDropzone"] button:is([data-testid="stBaseButton-secondary"], [aria-label="Add files"])::after {
+    content: '+'; font-size: 28px; color: #334155;}
+.st-key-chat-upload [data-testid="stFileUploaderDropzone"] button:is([data-testid="stBaseButton-secondary"], [aria-label="Add files"]):hover {background: #dfe7f4;}
+.st-key-chat-upload [data-testid="stFileUploaderDropzone"] button:is([data-testid="stBaseButton-secondary"], [aria-label="Add files"]):focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 3px;}
+
+[data-testid="stForm"] {background: white; border-radius: 20px; padding: 16px;}
+[data-testid="stChatMessage"] {border-radius: 16px; background: #f0f3fa;}
+[data-testid="stExpander"] {border-radius: 14px; background: white;}
+@media (max-width: 640px) {
+    .block-container {padding: 5.5rem 1rem 1.25rem;}
+    .app-header {font-size: 16px; padding: 18px 16px;}
+}
+</style>
+""", unsafe_allow_html=True)
 
 # Streamlit Cloud secrets and local .env both work. Never display the key.
 try:
@@ -23,39 +62,6 @@ try:
             os.environ[setting] = str(st.secrets[setting])
 except FileNotFoundError:
     pass
-
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
-html, body, [class*="css"], .stApp {font-family:'DM Sans',sans-serif;}
-.stApp {background:#f7f8fa;color:#182c30;}
-.block-container {max-width:1280px;padding-top:2.4rem;padding-bottom:3rem;}
-h1,h2,h3 {font-family:'Manrope',sans-serif!important;letter-spacing:-.035em;}
-h1 {font-weight:800!important;font-size:2.5rem!important;}
-[data-testid="stSidebar"] {background:#102e2b;}
-[data-testid="stSidebar"] * {color:#e4eee9;}
-[data-testid="stSidebar"] input {color:#182c30;}
-[data-testid="stSidebar"] [data-baseweb="select"] * {color:#182c30;}
-[data-testid="stSidebar"] button {background:#20443e;border-color:#375850;}
-[data-testid="stSidebar"] hr {border-color:#35544d;}
-[data-testid="stMetric"] {background:white;border:1px solid #e1e8e5;border-radius:12px;padding:18px 22px;}
-[data-testid="stMetricLabel"] {color:#71817c;font-size:.8rem;}
-[data-testid="stMetricValue"] {font-family:'Manrope',sans-serif;font-weight:700;}
-[data-testid="stChatMessage"] {background:white;border:1px solid #e1e8e5;border-radius:12px;}
-.stButton button[kind="primary"] {background:#21765d;border-color:#21765d;border-radius:8px;}
-[data-testid="stExpander"] {background:white;border-radius:10px;}
-[data-baseweb="tab-list"] {gap:26px;border-bottom:1px solid #dce5e1;margin:12px 0 22px;}
-[data-baseweb="tab"] {font-weight:600;}
-.eyebrow {font-size:.72rem;font-weight:700;letter-spacing:.16em;color:#4e8572;margin-bottom:10px;}
-.hero {padding:35px;border:1px solid #d8e6df;border-radius:16px;background:linear-gradient(120deg,#edf5ef,#fff);margin:20px 0 28px;}
-.hero h2 {font-size:2.05rem;margin:0 0 12px;max-width:620px;}
-.hero p {color:#60766c;max-width:650px;line-height:1.7;}
-.step {font-size:.72rem;letter-spacing:.12em;color:#508770;font-weight:700;}
-.brand {font-family:'Manrope',sans-serif;font-size:1.35rem;font-weight:800;line-height:1.3;margin:8px 0 10px;}
-.side-caption {color:#9bb6ab!important;font-size:.85rem;line-height:1.6;}
-.footer {color:#83928c;font-size:.75rem;margin-top:35px;border-top:1px solid #dfe7e2;padding-top:16px;}
-</style>
-""", unsafe_allow_html=True)
 
 st.session_state.setdefault("workspace_id", uuid.uuid4().hex)
 persistent = os.getenv("EQUITY_WORKSPACE_MODE", "session") == "persistent"
@@ -68,7 +74,7 @@ def show_error(action, error):
     if isinstance(error, ValueError):
         st.error(str(error))
     else:
-        st.error(f"{action} could not finish. Check your API credentials, quota and connection, then retry. "
+        st.error(f"{action} could not finish. Please try again. "
                  "Your previously indexed reports are still available.")
 
 
@@ -78,16 +84,33 @@ def report_label(report):
 
 
 def render_sources(sources, key):
-    if sources:
-        st.caption(f"{len(sources)} supporting source(s) · page numbers refer to the PDF, including its cover")
-    for source in sources:
-        with st.expander(f"[{source.get('id', 'Source')}] {citation_label(source)}"):
-            st.text(source["content"])
-            pdf = Path(active["index_dir"]) / f"{source['report_id']}.pdf"
-            if pdf.exists():
-                st.download_button("Download source report", pdf.read_bytes(),
-                                   file_name=source.get("source", "report.pdf"), mime="application/pdf",
-                                   key=f"{key}-{source['id']}-pdf")
+    if not sources:
+        return
+    with st.expander("View answer sources"):
+        index = st.selectbox("Cited page", range(len(sources)),
+            format_func=lambda i: f"[{sources[i].get('id', 'Source')}] PDF page {sources[i]['page']}",
+            key=f"{key}-page")
+        source = sources[index]
+        st.caption(citation_label(source))
+        pdf = Path(active["index_dir"]) / f"{source['report_id']}.pdf"
+        preview = None
+        if pdf.exists():
+            try:
+                preview = render_pdf_page(pdf, source['page'])
+            except (ValueError, RuntimeError, OSError):
+                st.caption("The page preview is unavailable. You can read the extracted text below.")
+        else:
+            st.caption("The original PDF is unavailable for this saved report.")
+        if preview:
+            st.image(preview, width="stretch")
+            st.caption("Original PDF page — table columns, headings and units are preserved.")
+            st.download_button("Download page image", preview,
+                file_name=f"source-page-{source['page']}.png", mime="image/png", key=f"{key}-image")
+        if st.checkbox("Show retrieved text", key=f"{key}-text", value=not bool(preview)):
+            st.caption("These are the excerpts used for the answer. PDF extraction may split table columns across lines.")
+            with st.container(height=240):
+                st.text(source['content'])
+
 
 
 def readable_markdown(text):
@@ -107,238 +130,272 @@ except Exception as exc:
     show_error("Loading the report library", exc)
     companies = []
 
-with st.sidebar:
-    st.markdown('<div class="eyebrow">RESEARCH WORKSPACE</div><div class="brand">◈ Equity Research<br>Copilot</div>', unsafe_allow_html=True)
-    st.markdown('<p class="side-caption">From financial disclosures<br>to defensible insights.</p>', unsafe_allow_html=True)
-    st.divider()
-    if companies:
-        company_path = st.selectbox("Active company", [c["index_dir"] for c in companies],
-            format_func=lambda path: next(c["company_name"] for c in companies if c["index_dir"] == path),
-            key="company_picker")
-        active = next(c for c in companies if c["index_dir"] == company_path)
-    else:
-        active = None
-        st.caption("Your companies will appear here after indexing.")
-    st.divider()
-    st.markdown("**Workspace status**")
-    st.caption("● API configured" if ready else "○ API setup needed")
-    st.caption("Persistent library" if persistent else "Private session library")
-    st.caption("Reports stay on this server." if persistent else "Reports are isolated to this browser session. A new session starts a new library.")
-    with st.expander("Setup & methodology"):
-        st.write("Set OPENAI_API_KEY in .env locally or in Streamlit deployment secrets.")
-        st.write("Report text is sent to OpenAI for metadata, embeddings and analysis. PDF page numbers include the cover.")
-        st.write("Searchable PDFs only, up to 50 MB each. Confirm detected metadata before indexing.")
-        st.write("Financial extraction verifies quoted figures; review accounting units and period definitions before interpreting trends.")
+saved_reports = {c["index_dir"] + "::" + r["report_id"]: (c, r)
+                 for c in companies for r in c["reports"]}
+if st.session_state.get("activate_report"):
+    st.session_state["report_picker"] = st.session_state.pop("activate_report")
 
-st.markdown('<div class="eyebrow">DOCUMENT INTELLIGENCE / EQUITY RESEARCH</div>', unsafe_allow_html=True)
-st.title(active["company_name"] if active else "Better research starts with evidence.")
-st.caption("Explore the disclosures. Connect the periods. Trace every insight to its source.")
+st.markdown('<header class="app-header" aria-label="Application">Equity Research Copilot</header>', unsafe_allow_html=True)
+
+active = None
+report_key = st.session_state.get("report_picker")
+if report_key not in saved_reports:
+    report_key = next(iter(saved_reports), None)
+if report_key is not None:
+    company, report = saved_reports[report_key]
+    active = {**company, "reports": [report]}
 
 if not ready:
-    st.info("Add OPENAI_API_KEY to your .env file or Streamlit secrets to enable report analysis. The workspace is ready to explore.")
+    st.info("Report analysis is currently unavailable. Please try again later.")
 
 reports = active["reports"] if active else []
-cols = st.columns(4)
-for col, label, value in zip(cols, ["REPORTS INDEXED", "FISCAL YEARS", "PAGES OF EVIDENCE", "KNOWLEDGE BASES"],
-                            [len(reports), len({r['fiscal_year'] for r in reports}),
-                             sum(r.get('pages', 0) or 0 for r in reports), len(companies)]):
-    col.metric(label, value)
 
-library, research_tab, compare_tab, metrics_tab = st.tabs(["Report library", "Research chat", "Compare periods", "Financial metrics"])
+content_area = st.container()
+composer = st.container(key="chat-composer", border=True)
+with composer:
+    message_control = st.container()
+    file = st.file_uploader("Attach a PDF", type="pdf", accept_multiple_files=False,
+                            label_visibility="collapsed", key="chat-upload")
 
-with library:
-    if not reports:
-        st.markdown('<div class="hero"><div class="eyebrow">YOUR ANALYST WORKBENCH</div><h2>One company. Multiple reports.<br>A clearer investment picture.</h2><p>Bring annual, quarterly and earnings reports together. Ask follow-up questions, compare disclosures across periods, and inspect the evidence behind each answer.</p></div>', unsafe_allow_html=True)
-        for col, number, title, description in zip(st.columns(3), ["01 / COLLECT", "02 / UNDERSTAND", "03 / RESEARCH"],
-            ["Build your report library", "Review the report identity", "Follow the evidence"],
-            ["Upload searchable financial PDFs. Duplicate content is recognized automatically.",
-             "Confirm the company, fiscal year and reporting period before indexing.",
-             "Get conversational answers and period comparisons with exact source pages."]):
-            with col:
-                st.markdown(f'<div class="step">{number}</div>', unsafe_allow_html=True)
-                st.markdown(f"**{title}**")
-                st.caption(description)
-        st.divider()
-    st.subheader("Add financial reports")
-    files = st.file_uploader("Annual reports, quarterly filings or earnings releases", type="pdf", accept_multiple_files=True)
-    st.caption("Upload → Detect metadata → Review → Index. Add reports without clearing your existing research.")
-    signature = tuple((f.name, hashlib.sha256(f.getvalue()).hexdigest()) for f in files)
-    if st.session_state.get("pending_signature") != signature:
-        st.session_state.pop("pending_reports", None)
-        st.session_state["pending_signature"] = signature
-    if st.button("Detect report details", type="primary", disabled=not files or not ready):
-        pending = []
-        progress = st.progress(0, text="Reading report details…")
-        for i, file in enumerate(files):
-            try:
-                detail = prepare_report(file.getvalue(), file.name, root)
-                pending.append({"detail": detail, "bytes": file.getvalue()})
-            except Exception as exc:
-                st.caption(file.name)
-                show_error("Report detection", exc)
-            progress.progress((i + 1) / len(files))
-        progress.empty()
-        st.session_state.pending_reports = pending
-    pending = st.session_state.get("pending_reports", [])
-    if pending:
-        st.markdown("**Review detected details**")
-        st.caption("Use the same company name for all periods of an issuer. Correct any detection errors here.")
-        with st.form("review_reports"):
-            edited = []
-            for i, item in enumerate(pending):
-                detail = item["detail"]
-                st.markdown(f"**{detail['filename']}** · {detail['pages']} pages")
-                if detail["reused"]:
-                    st.info(f"Already indexed for {detail['company_name']} — duplicate skipped.")
-                    edited.append(None)
-                    continue
-                c1, c2, c3, c4 = st.columns([3, 1, 2, 1])
-                company = c1.text_input("Company", detail["company_name"], key=f"co-{detail['report_id']}-{i}")
-                year = c2.text_input("Fiscal year", detail["fiscal_year"], key=f"yr-{detail['report_id']}-{i}")
-                types = ["Annual Report", "Quarterly Report", "Earnings Report", "Other"]
-                report_type = c3.selectbox("Report type", types, index=types.index(detail["report_type"]) if detail["report_type"] in types else 3, key=f"ty-{i}")
-                periods = ["FY", "Q1", "Q2", "Q3", "Q4", "Unknown"]
-                period = c4.selectbox("Period", periods, index=periods.index(detail.get("fiscal_period", "Unknown")) if detail.get("fiscal_period") in periods else 5, key=f"pe-{i}")
-                edited.append(dict(company_name=company, fiscal_year=year.strip(), report_type=report_type, fiscal_period=period))
-            submitted = st.form_submit_button("Confirm & index reports", type="primary", disabled=not ready)
-        if submitted:
-            failures, new_count, reused_count = [], 0, 0
-            with st.status("Building the company knowledge base…", expanded=True) as status:
-                for item, metadata in zip(pending, edited):
-                    try:
-                        st.write(f"Processing {item['detail']['filename']}")
-                        result = ingest_pdf(item["bytes"], item["detail"]["filename"], metadata, root)
-                        reused_count += int(result["reused"])
-                        new_count += int(not result["reused"])
-                    except Exception as exc:
-                        failures.append(item)
-                        show_error("Indexing", exc)
-                status.update(label=f"{new_count} indexed · {reused_count} duplicates skipped · {len(failures)} failed", state="error" if failures else "complete")
-            st.session_state.pending_reports = failures
-            if not failures:
-                st.session_state["library_notice"] = f"{new_count} new report(s) indexed. {reused_count} duplicate(s) skipped."
-                st.rerun()
-    if st.session_state.get("library_notice"):
-        st.success(st.session_state.pop("library_notice"))
-    if reports:
-        st.subheader("Indexed reports")
-        for report in reports:
-            with st.expander(report_label(report)):
-                st.caption(f"{report.get('pages', '—')} pages · {report.get('chunks', '—')} searchable passages · ID {report['report_id']}")
-                pdf = Path(active["index_dir"]) / f"{report['report_id']}.pdf"
-                if pdf.exists():
-                    st.download_button("Download original PDF", pdf.read_bytes(), report["filename"], "application/pdf", key=f"library-{report['report_id']}")
+st.session_state.setdefault("upload_attempts", {})
+signature = file_key(file.getvalue()) if file is not None else None
+attempt = st.session_state.upload_attempts.get(signature)
+if file is not None and attempt and attempt.get("error"):
+    st.error(attempt["error"])
+    if active:
+        st.caption("Upload not accepted. Your current PDF is still open.")
+    if st.button("Retry upload", disabled=not ready):
+        st.session_state.upload_attempts.pop(signature, None)
+        st.rerun()
+if file is not None and ready and signature not in st.session_state.upload_attempts:
+    st.session_state.upload_attempts[signature] = {"error": None}
+    try:
+        with st.spinner("Reading your PDF…"):
+            detail = prepare_report(file.getvalue(), file.name, root)
+            result = ingest_pdf(file.getvalue(), detail["filename"], detail, root)
+            st.session_state["activate_report"] = result["index_dir"] + "::" + detail["report_id"]
+        st.rerun()
+    except Exception as exc:
+        st.session_state.upload_attempts[signature] = {"error": str(exc) if isinstance(exc, ValueError)
+            else "Upload failed. Please try again."}
+        st.rerun()
 
-with research_tab:
-    st.subheader("Ask a better follow-up.")
-    st.caption("Research across reports, then keep the conversation going. Answers use your selected evidence only.")
+with content_area:
     if not active:
-        st.info("Index your first company report in the Report library to start researching.")
+        st.subheader("What would you like to understand?")
+        st.write("Upload an annual or quarterly report to start a conversation.")
+        st.caption("Ask about revenue, key risks, or changes from last year.")
+        with message_control:
+            st.text_area("Your question", placeholder="Upload a PDF to start chatting…",
+                         height=100, label_visibility="collapsed", disabled=True)
     else:
-        by_id = {r["report_id"]: r for r in reports}
-        selected = st.multiselect("Evidence scope · up to 12 reports", list(by_id), default=list(by_id)[:12],
-                                 format_func=lambda rid: report_label(by_id[rid]), key=f"scope-{active['index_dir']}")
-        chat_key = "chat-" + active["index_dir"] + "-" + "-".join(sorted(selected))
-        messages = st.session_state.setdefault(chat_key, [])
-        if messages:
-            c1, c2 = st.columns([1, 4])
-            if c1.button("Clear conversation"):
-                st.session_state[chat_key] = []
-                st.rerun()
-            c2.download_button("Export research notes", "\n\n".join(
-                f"## {m['role'].title()}\n\n" + (export_answer({"answer": m['content'], "sources": m.get('sources', [])}))
-                for m in messages), "research-notes.md", "text/markdown")
-        else:
-            st.caption("Try: How did revenue growth change? • What drove operating margins? • Which risks became more significant?")
-        for i, message in enumerate(messages):
-            with st.chat_message(message["role"]):
-                st.markdown(readable_markdown(message["content"]))
-                if message["role"] == "assistant":
-                    render_sources(message.get("sources", []), f"chat-{i}")
-        question = st.chat_input("Ask about growth, margins, cash flow or risks…", disabled=not ready or not selected or len(selected) > 12)
-        if question:
-            with st.chat_message("user"):
-                st.markdown(readable_markdown(question))
+        report = reports[0]
+        st.caption(f"Chatting with {report['filename']} · {active['company_name']} · FY{report['fiscal_year']}")
+        chat_tab = st.container()
+        summary_tab = st.expander("Report summary", expanded=False)
+        sources_tab = st.expander("Report sources and downloads", expanded=False)
+        with sources_tab:
+            pdf = Path(active["index_dir"]) / f"{report['report_id']}.pdf"
+            if pdf.exists():
+                st.download_button("Download original PDF", pdf.read_bytes(), report["filename"], "application/pdf",
+                                   key=f"report-{report['report_id']}")
+
+        dashboard_key = "dashboard-" + active["index_dir"] + dashboard_signature(reports)
+        if ready and dashboard_key not in st.session_state:
             try:
-                with st.spinner("Reading across your selected reports…"):
-                    result = ask_equity_question(question, active["index_dir"], messages[-6:], selected)
-                messages.extend([{"role": "user", "content": question},
-                                 {"role": "assistant", "content": result["answer"], "sources": result["sources"]}])
+                with st.status("Analyzing financial performance, segments and risks…", expanded=True) as status:
+                    def progress(index, total, name):
+                        status.update(label=f"Researching report {index + 1} of {total}: {name}")
+                    st.session_state[dashboard_key] = load_dashboard(active["index_dir"], progress=progress, report_ids=[reports[0]["report_id"]])
+                    status.update(label="Research dashboard ready", state="complete")
+            except Exception as exc:
+                st.session_state[dashboard_key] = {"errors": [{"report": "Dashboard", "message": "Analysis could not finish. Please try again."}],
+                    "analyzed": 0, "total": len(reports), **{key: [] for key in ['insights', 'metrics', 'segments', 'risks', 'drivers', 'sources']}}
+        data = st.session_state.get(dashboard_key)
+        if data:
+            summary_tab.caption(f"{data['analyzed']} of {data['total']} reports analyzed")
+            for error in data['errors']:
+                st.warning(f"{error['report']}: {error['message']}")
+            if data['errors'] and st.button("Retry incomplete analysis", disabled=not ready):
+                st.session_state.pop(dashboard_key, None)
                 st.rerun()
-            except Exception as exc:
-                show_error("Research", exc)
+            sources = {source['id']: source for source in data['sources']}
 
-with compare_tab:
-    st.subheader("Understand what changed.")
-    st.caption("Select two reports and a research topic. Compare figures, disclosed drivers and implications side by side.")
-    if len(reports) < 2:
-        st.info("Index at least two reports for the same company to compare periods.")
-    else:
-        options = {r["report_id"]: r for r in reports}
-        c1, c2 = st.columns(2)
-        left = c1.selectbox("Baseline report", list(options), format_func=lambda rid: report_label(options[rid]), key=f"left-{active['index_dir']}")
-        right = c2.selectbox("Comparison report", [rid for rid in options if rid != left], format_func=lambda rid: report_label(options[rid]), key=f"right-{active['index_dir']}")
-        topic = st.text_input("Focus of comparison", placeholder="e.g. Azure growth, operating margins, capital expenditure")
-        comparison_key = "comparison-" + active["index_dir"] + left + right + topic
-        if st.button("Analyze changes", type="primary", disabled=not ready or not topic.strip()):
-            try:
-                with st.spinner("Comparing evidence from both reports…"):
-                    result = ask_equity_question(
-                        f"Compare {topic}. Baseline: {report_label(options[left])}. "
-                        f"Comparison: {report_label(options[right])}. Explain values in each report, "
-                        "the size and direction of the change, disclosed drivers, and key takeaway.",
-                        active["index_dir"], report_ids=[left, right])
-                st.session_state[comparison_key] = result
-            except Exception as exc:
-                show_error("Comparison", exc)
-        if comparison_key in st.session_state:
-            result = st.session_state[comparison_key]
-            st.markdown(readable_markdown(result["answer"]))
-            render_sources(result["sources"], "comparison")
-            st.download_button("Export comparison", export_answer(result), "report-comparison.md", "text/markdown")
+            def finding_sources(ids, key):
+                pages = sorted({sources[sid]['page'] for sid in ids if sid in sources})
+                if pages:
+                    st.caption("Source: PDF page " + ", ".join(map(str, pages)))
 
-with metrics_tab:
-    st.subheader("Turn disclosures into structured data.")
-    st.caption("Extract a consolidated financial metric from each selected report, with a verifiable excerpt for every value.")
-    if not reports:
-        st.info("Add reports to extract financial metrics.")
-    else:
-        metric = st.selectbox("Financial metric", METRICS)
-        metric_options = {r["report_id"]: r for r in reports}
-        metric_reports = st.multiselect("Reports to extract · up to 12", list(metric_options), default=list(metric_options)[:12],
-                format_func=lambda rid: report_label(metric_options[rid]), key=f"metrics-scope-{active['index_dir']}")
-        metric_key = "metrics-" + active["index_dir"] + metric + "-".join(metric_reports)
-        if st.button("Extract cited figures", type="primary", disabled=not ready or not metric_reports or len(metric_reports) > 12):
-            rows, missing = [], []
-            with st.status("Extracting and checking reported figures…"):
-                for rid in metric_reports:
-                    try:
-                        extracted = extract_financial_metrics(active["index_dir"], rid, metric)
-                        rows.extend(extracted)
-                        if not extracted:
-                            missing.append(report_label(metric_options[rid]))
-                    except Exception as exc:
-                        missing.append(report_label(metric_options[rid]))
-                        show_error("Financial extraction", exc)
-            st.session_state[metric_key] = {"rows": rows, "missing": missing}
-        if metric_key in st.session_state:
-            extraction = st.session_state[metric_key]
-            rows = extraction["rows"]
-            for label in extraction["missing"]:
-                st.warning(f"No verified figure returned for {label}. Try Research chat to inspect the disclosure.")
-            if rows:
-                columns = ["metric", "period", "value", "unit", "currency", "basis", "report", "page"]
-                st.dataframe([{k: row[k] for k in columns} for row in rows], hide_index=True, width="stretch")
-                st.caption("Values preserve the reported scale. Periods and accounting bases may differ; review the evidence before comparison.")
-                for i, row in enumerate(rows):
-                    with st.expander(f"{row['report']} · {row['period']} · PDF page {row['page']}"):
-                        st.text(row["quote"])
-                output = io.StringIO()
-                writer = csv.DictWriter(output, fieldnames=list(rows[0]))
-                writer.writeheader()
-                # Neutralize spreadsheet formula prefixes in text fields.
-                writer.writerows({k: ("'" + v if isinstance(v, str) and v.startswith(("=", "+", "-", "@")) else v)
-                                  for k, v in row.items()} for row in rows)
-                st.download_button("Download financial metrics CSV", output.getvalue(), "financial-metrics.csv", "text/csv")
+            def render_findings(items, prefix, limit=3):
+                if not items:
+                    st.caption("Not enough verified evidence in the analyzed reports.")
+                for i, finding in enumerate(items[:limit]):
+                    st.markdown(readable_markdown("• " + finding['text']))
+                    finding_sources(finding.get('source_ids', [finding.get('source_id')]), f"{prefix}-{i}")
 
-st.markdown('<div class="footer">◈ Equity Research Copilot &nbsp; / &nbsp; Source-grounded financial intelligence &nbsp; / &nbsp; Verify cited disclosures before making investment decisions.</div>', unsafe_allow_html=True)
+            with summary_tab:
+                groups = series_groups(data['metrics'])
+                changes = automatic_changes(groups)
+                st.subheader("Key insights")
+                # Computed changes are shown first; report findings provide the disclosed context.
+                render_findings(changes[:3] + data['insights'], 'insight')
+
+                st.subheader("Key metrics")
+                available_periods = sorted({(r['fiscal_year'], r['period']) for r in data['metrics']},
+                                          key=lambda pair: period_order({'fiscal_year': pair[0], 'period': pair[1]}), reverse=True)
+                if available_periods:
+                    period = st.selectbox("Reporting period", available_periods,
+                                          format_func=lambda value: f"FY{value[0]} · {value[1]}", key=f"period-{dashboard_key}")
+                    period_rows = [r for r in data['metrics'] if (r['fiscal_year'], r['period']) == period]
+                    main_metrics = ["Revenue", "Net income", "Diluted EPS"]
+                    for name in main_metrics:
+                        candidates = [r for r in period_rows if r['name'] == name
+                                      and r['scope'].casefold() == 'consolidated']
+                        identities = {(r['value'] * SCALES[r['unit']], r['currency'], r['basis'],
+                                       r['duration_months'], r['unit'] if r['unit'] in {'per share', 'percent'} else 'amount')
+                                      for r in candidates}
+                        with st.container(border=True):
+                            if not candidates:
+                                st.write(f"**{name}:** Not found in the verified excerpts")
+                            elif len(identities) != 1:
+                                st.write(f"**{name}:** Multiple reported values — see the financial table below.")
+                            else:
+                                row = candidates[0]
+                                unit = 'per share' if row['unit'] == 'per share' else row['unit']
+                                currency = '' if unit == 'percent' else row['currency'] + ' '
+                                st.write(f"**{name}: {currency}{row['value']:,.2f} {unit}**")
+                                st.caption(f"{row['duration_months']} months · {row['basis']} · PDF page {sources[row['source_id']]['page']}")
+
+                else:
+                    st.info("No financial figures could be verified. You can still research the disclosures in the copilot.")
+
+                st.subheader("Financial trends")
+                chart_groups = [group for group in groups if len(group['points']) >= 2]
+                if not chart_groups:
+                    st.info("Trends need at least two verified, comparable periods. Comparative figures within one report can also provide a trend.")
+                chart_columns = st.columns(2)
+                for i, group in enumerate(chart_groups[:2]):
+                    with chart_columns[i % 2]:
+                        name, scope, period, duration, currency, basis, kind = group['key']
+                        st.markdown(f"**{name}** · {scope}")
+                        divisor = 1e6 if kind == 'amount' else 1
+                        unit = f"{currency} millions" if kind == 'amount' else '%' if kind == 'percent' else f"{currency} per share"
+                        st.caption(f"{unit} · {duration}-month {period} periods · {basis}")
+                        chart_data = [{'Period': point['period_label'], 'Value': point['normalized_value'] / divisor}
+                                      for point in group['points']]
+                        st.line_chart(chart_data, x='Period', y='Value', color='#2563eb')
+                        with st.expander("Trend data and citations"):
+                            st.dataframe(chart_data, hide_index=True, width='stretch')
+                            finding_sources([point['source_id'] for point in group['points']], f"trend-{i}")
+                for group in groups:
+                    if group['conflicts']:
+                        st.caption(f"{group['key'][0]}: conflicting reported values for " + ', '.join(map(str, group['conflicts'])) +
+                                   " were excluded from trend calculations. Review the financial table for restatements or rounding differences.")
+
+                st.subheader("Key risks")
+                render_findings(data['risks'], 'risk')
+                with st.expander("Business segments and growth"):
+                    st.subheader("Segment performance")
+                    render_findings(data['segments'], 'segment')
+                    st.subheader("Growth drivers")
+                    render_findings(data['drivers'], 'driver')
+
+            with sources_tab:
+                st.subheader("Sources and evidence")
+                pages = {}
+                for source in data['sources']:
+                    pages.setdefault((source['report_id'], source['page']), []).append(source)
+                if not pages:
+                    st.caption("No verified source excerpts are available yet.")
+                else:
+                    page_key = st.selectbox("Source page", sorted(pages),
+                        format_func=lambda value: f"PDF page {value[1]}",
+                        key=f"source-page-{dashboard_key}")
+                    page_sources = pages[page_key]
+                    page_ids = {source['id'] for source in page_sources}
+                    st.caption("Page numbers include the PDF cover. Figures below retain the reported units.")
+                    page_metrics = [row for row in data['metrics'] if row['source_id'] in page_ids]
+                    if page_metrics:
+                        st.markdown("**Figures from this page**")
+                        table = [{
+                            "Metric": row['name'],
+                            "Period": f"FY{row['fiscal_year']} · {row['period']}",
+                            "Value": f"{row['value']:,.2f}",
+                            "Units": f"{row['currency']} {row['unit']}",
+                            "Scope": row['scope'],
+                            "Basis": row['basis'],
+                            "Months": row['duration_months'],
+                        } for row in sorted(page_metrics, key=lambda row: (row['name'], -row['fiscal_year']))]
+                        st.dataframe(table, hide_index=True, width="stretch")
+                    findings = [item for section in ['insights', 'segments', 'risks', 'drivers']
+                                for item in data[section] if item.get('source_id') in page_ids]
+                    quotes = list(dict.fromkeys(item['quote'] for item in findings if item.get('quote')))
+                    if quotes:
+                        st.markdown("**Supporting quotes**")
+                        for quote in quotes:
+                            st.markdown("> " + readable_markdown(" ".join(quote.split())))
+                    if not page_metrics and not quotes:
+                        st.caption("Open the original excerpt below to read this source.")
+                    if st.checkbox("Show original extracted text", key=f"raw-source-{dashboard_key}"):
+                        st.caption("PDF extraction can split table columns across lines. This is the original retrieved text.")
+                        with st.container(height=300):
+                            st.text("\n\n[…]\n\n".join(dict.fromkeys(source['content'] for source in page_sources)))
+
+            with sources_tab:
+                if data['metrics']:
+                    with st.expander("Financial data & export"):
+                        columns = ['name', 'scope', 'fiscal_year', 'period', 'duration_months', 'value', 'unit', 'currency', 'basis', 'source_id']
+                        st.dataframe([{key: row[key] for key in columns} for row in data['metrics']], hide_index=True, width='stretch')
+                        st.caption("Reported values retain their original scale. Charts normalize monetary scales and separate reporting bases. Verify source excerpts before relying on classifications.")
+                        output = io.StringIO()
+                        fields = list(data['metrics'][0]) + ['source_report', 'pdf_page']
+                        writer = csv.DictWriter(output, fieldnames=fields)
+                        writer.writeheader()
+                        for row in data['metrics']:
+                            source = sources[row['source_id']]
+                            exported = {**row, 'source_report': source.get('source'), 'pdf_page': source['page']}
+                            writer.writerow({key: "'" + value if isinstance(value, str) and value.startswith(('=', '+', '-', '@')) else value
+                                             for key, value in exported.items()})
+                        st.download_button("Download financial metrics CSV", output.getvalue(), "financial-metrics.csv", "text/csv")
+
+        if not data:
+            summary_tab.info("The report summary is not available yet.")
+        with chat_tab:
+
+            selected = [reports[0]["report_id"]]
+            chat_key = "chat-" + active["index_dir"] + "-" + "-".join(sorted(selected))
+            messages = st.session_state.setdefault(chat_key, [])
+            if messages:
+                c1, c2 = st.columns(2)
+                if c1.button("Clear conversation"):
+                    st.session_state[chat_key] = []
+                    st.rerun()
+                c2.download_button("Export research notes", "\n\n".join(
+                    f"## {m['role'].title()}\n\n" + export_answer({'answer': m['content'], 'sources': m.get('sources', [])})
+                    for m in messages), "research-notes.md", "text/markdown")
+            else:
+                st.subheader("What would you like to know?")
+                st.caption("Try: What were the main risks? Or: How did revenue change?")
+            for i, message in enumerate(messages):
+                with st.chat_message(message['role']):
+                    st.markdown(readable_markdown(message['content']))
+                    if message['role'] == 'assistant':
+                        render_sources(message.get('sources', []), f"chat-{i}")
+            with message_control, st.form(f"question-form-{chat_key}", clear_on_submit=True):
+                question = st.text_area("Your question", placeholder="Ask about this PDF…",
+                                        max_chars=6000, height=100, label_visibility="collapsed", disabled=not ready or not selected)
+                submitted = st.form_submit_button("Ask", type="primary", disabled=not ready or not selected)
+            if submitted and question.strip():
+                with st.chat_message('user'):
+                    st.markdown(readable_markdown(question))
+                try:
+                    with st.spinner("Researching your reports…"):
+                        result = ask_equity_question(question, active['index_dir'], messages[-6:], selected)
+                    messages.extend([{'role': 'user', 'content': question},
+                                     {'role': 'assistant', 'content': result['answer'], 'sources': result['sources']}])
+                    st.rerun()
+                except Exception as exc:
+                    show_error("Research", exc)
+
+st.divider()
+st.caption("Answers may contain mistakes. Check the cited pages.")
