@@ -154,8 +154,10 @@ content_area = st.container()
 composer = st.container(key="chat-composer", border=True)
 with composer:
     message_control = st.container()
-    file = st.file_uploader("Attach a PDF", type="pdf", accept_multiple_files=False,
-                            label_visibility="collapsed", key="chat-upload")
+    file = None
+    if not active:
+        file = st.file_uploader("Upload PDF", type="pdf", accept_multiple_files=False,
+                                label_visibility="collapsed", key="chat-upload")
 
 st.session_state.setdefault("upload_attempts", {})
 signature = file_key(file.getvalue()) if file is not None else None
@@ -185,9 +187,6 @@ with content_area:
         st.subheader("What would you like to understand?")
         st.write("Upload an annual or quarterly report to start a conversation.")
         st.caption("Ask about revenue, key risks, or changes from last year.")
-        with message_control:
-            st.text_area("Your question", placeholder="Upload a PDF to start chatting…",
-                         height=100, label_visibility="collapsed", disabled=True)
     else:
         report = reports[0]
         st.caption(f"Chatting with {report['filename']} · {active['company_name']} · FY{report['fiscal_year']}")

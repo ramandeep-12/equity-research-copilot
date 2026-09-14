@@ -17,6 +17,7 @@ class AppTests(unittest.TestCase):
             app = AppTest.from_file(APP, default_timeout=30).run()
             self.assertFalse(app.exception)
             self.assertEqual(len(app.tabs), 0)
+            self.assertEqual(len(app.text_area), 0)
             self.assertTrue(any('unavailable' in item.value for item in app.info))
 
     def test_dashboard_automatically_loads_and_chat_keeps_context(self):

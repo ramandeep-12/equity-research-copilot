@@ -71,7 +71,7 @@ class UploadValidationTests(unittest.TestCase):
                 ingest_pdf(pdf_bytes("A random essay"), "essay.pdf", metadata(), root)
             self.assertFalse(list_companies(root))
 
-    def test_single_upload_switches_dashboard_without_combining_reports(self):
+    def test_upload_opens_chat_and_removes_uploader(self):
         a = Upload("2024.pdf", pdf_bytes("Microsoft FY2024 revenue 200 million"))
         b = Upload("2025.pdf", pdf_bytes("Microsoft Corporation FY2025 revenue 220 million"))
         def detect(data):
@@ -86,18 +86,16 @@ class UploadValidationTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertEqual(len(list_companies(root)[0]['reports']), 1)
             self.assertEqual(analyze.call_count, 1)
+            calls_after_upload = uploader.call_count
             uploader.return_value = b
             app.run()
             self.assertFalse(app.exception)
-            libraries = list_companies(root)
-            self.assertEqual(len(libraries), 1)
-            self.assertEqual(len(libraries[0]['reports']), 2)
-            self.assertEqual(analyze.call_count, 2)
+            self.assertEqual(uploader.call_count, calls_after_upload)
+            self.assertEqual(len(list_companies(root)[0]['reports']), 1)
+            self.assertEqual(analyze.call_count, 1)
+            self.assertEqual(len(app.text_area), 1)
             self.assertEqual(len(app.multiselect), 0)
-            self.assertEqual(analyze.call_args.kwargs['report_ids'], [libraries[0]['reports'][1]['report_id']])
             self.assertFalse(uploader.call_args.kwargs['accept_multiple_files'])
-            app.run()
-            self.assertEqual(analyze.call_count, 2)
 
     def test_failed_single_upload_can_retry(self):
         upload = Upload("broken.pdf", b"not a pdf")
