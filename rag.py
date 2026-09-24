@@ -1,5 +1,7 @@
 """Command line research using an existing company index."""
+
 import argparse
+
 from research import ask_equity_question, citation_label
 
 
@@ -18,8 +20,12 @@ def main():
         print(result["answer"])
         for source in result["sources"]:
             print(f"[{source['id']}] {citation_label(source)}")
-        history.extend([{"role": "user", "content": question},
-                        {"role": "assistant", "content": result["answer"]}])
+        history.extend(
+            [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": result["answer"]},
+            ]
+        )
 
 
 if __name__ == "__main__":

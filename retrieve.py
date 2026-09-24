@@ -1,5 +1,7 @@
 """Inspect retrieval against a company knowledge base."""
+
 import argparse
+
 from research import retrieve_evidence
 
 

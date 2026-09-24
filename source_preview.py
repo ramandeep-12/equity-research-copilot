@@ -1,4 +1,5 @@
 """Show source tables as printed, without guessing columns from extracted text."""
+
 from pathlib import Path
 
 import pymupdf

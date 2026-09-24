@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Keep formatting and lint results consistent across development machines.
+ruff==0.15.6

@@ -129,3 +129,18 @@ These commands use the provider API. For session-mode indexes, pass the actual c
 - `settings.py`: environment configuration and lazy API clients
 - `tests/`: offline backend and Streamlit interaction checks
 - `.streamlit/config.toml`, `Dockerfile`: theme and deployment configuration
+
+## Code style and learning guide
+
+See [WALKTHROUGH.md](WALKTHROUGH.md) for a step-by-step explanation of the upload and question pipelines, design decisions, and limitations you can discuss in a project demonstration.
+
+Install development tools and run the same checks before committing:
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .
+ruff format --check .
+python -m unittest discover -s tests -v
+```
+
+Use `ruff format .` to apply formatting. The style configuration lives in `pyproject.toml`. Keep functions focused, use named constants for processing limits, and document why a validation rule exists. When changing dashboard extraction rules, increase `VERSION` in `dashboard.py` so old cached analyses are regenerated.
